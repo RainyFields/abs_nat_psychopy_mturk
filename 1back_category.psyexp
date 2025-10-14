@@ -14,7 +14,7 @@
     <Param val="html/" valType="str" updates="None" name="HTML path"/>
     <Param val="" valType="str" updates="None" name="Incomplete URL"/>
     <Param val="testMonitor" valType="str" updates="None" name="Monitor"/>
-    <Param val="['html/resources/images/409_Animals.png', 'html/resources/images/402_Animals.png', 'html/resources/images/386_Cars.png', 'html/resources/images/352_Cars.png', 'html/resources/images/306_Planes.png', 'html/resources/images/188_Chairs.png', 'html/resources/images/157_Chairs.png']" valType="list" updates="None" name="Resources"/>
+    <Param val="['images/409_Animals.png', 'images/402_Animals.png', 'images/386_Cars.png', 'images/352_Cars.png', 'images/306_Planes.png', 'images/188_Chairs.png', 'images/157_Chairs.png']" valType="list" updates="None" name="Resources"/>
     <Param val="False" valType="bool" updates="None" name="Save csv file"/>
     <Param val="False" valType="bool" updates="None" name="Save excel file"/>
     <Param val="False" valType="bool" updates="None" name="Save hdf5 file"/>
