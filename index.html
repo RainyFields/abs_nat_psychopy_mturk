@@ -14,6 +14,24 @@
     <script src="https://cdn.jsdelivr.net/npm/jquery@3.6.0/dist/jquery.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jquery-ui-dist@1.12.1/jquery-ui.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/preloadjs@1.0.1/lib/preloadjs.min.js"></script>
+
+    <script>
+    // --- Read MTurk parameters ---
+    function getParam(param) {
+        const url = new URL(window.location.href);
+        return url.searchParams.get(param);
+    }
+
+    // Get workerId, assignmentId, and hitId
+    const workerId = getParam('workerId');
+    const assignmentId = getParam('assignmentId');
+    const hitId = getParam('hitId');
+
+    // Store globally so PsychoJS / your JS can use it
+    window.mturkParams = { workerId, assignmentId, hitId };
+    console.log("MTurk Parameters:", window.mturkParams);
+    </script>
+
     <!-- experiment -->
     <script src="./1back_category.js" type="module"></script>
     <!-- legacy browsers -->

@@ -14,6 +14,10 @@ let expName = '1back_category';
 let expInfo = { participant: '' };
 let PILOTING = util.getUrlParameters().has('__pilotToken');
 
+// ---- Read MTurk ID ----
+const workerId = window.mturkParams?.workerId || 'local-test';
+expInfo['workerId'] = workerId;
+
 const ASSETS_DIR = 'resources';
 const IMG_DIR = `${ASSETS_DIR}/images`;
 const FALLBACK = `${IMG_DIR}/157_Chairs.png`;
