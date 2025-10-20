@@ -18,29 +18,37 @@ const ASSETS_DIR = 'resources';
 const IMG_DIR = `${ASSETS_DIR}/images`;
 const FALLBACK = `${IMG_DIR}/157_Chairs.png`;
 
-function normPath(p) {
-  if (!p) return '';
-  p = String(p).trim();
-  if (!p) return '';
-  if (/^https?:\/\//i.test(p)) return p;               // absolute URL
-  if (p.startsWith(`${ASSETS_DIR}/`)) return p;         // already ok
-  if (p.startsWith('images/')) return `${ASSETS_DIR}/${p}`; // images/... -> resources/images/...
-  if (!p.includes('/')) return `${IMG_DIR}/${p}`;       // bare filename
-  return `${ASSETS_DIR}/${p}`;                          // any other relative
-}
+// function normPath(p) {
+//   if (!p) return '';
+//   p = String(p).trim();
+//   if (!p) return '';
+//   if (/^https?:\/\//i.test(p)) return p;               // absolute URL
+//   if (p.startsWith(`${ASSETS_DIR}/`)) return p;         // already ok
+//   if (p.startsWith('images/')) return `${ASSETS_DIR}/${p}`; // images/... -> resources/images/...
+//   if (!p.includes('/')) return `${IMG_DIR}/${p}`;       // bare filename
+//   return `${ASSETS_DIR}/${p}`;                          // any other relative
+// }
 
 // --- Resource preload (collect from CSV + add fallback) ---
 const TRIALS_CSV = 'resources/1back_category_trials.csv';
-const ALWAYS_RESOURCES = ['resources/images/157_Chairs.png']; // your fallback
+const ALWAYS_RESOURCES = ['resources/images/157_Chairs.png']; // fallback
 
 async function collectImagePathsFromCSV(csvPath) {
   const res = await fetch(csvPath, { cache: 'no-store' });
   if (!res.ok) throw new Error(`Failed to load ${csvPath}: ${res.status}`);
-  const text = await res.text();
+  // Handle BOM + normalize line endings
+  let text = await res.text();
+  if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
 
-  // very light CSV parse (assumes comma-separated, header includes stim1..stim6)
-  const lines = text.split(/\r?\n/).filter(l => l.trim().length);
-  const header = lines[0].split(',').map(s => s.trim().toLowerCase());
+  const lines = text
+    .split(/\r?\n/)
+    .map(l => l.trim())
+    .filter(l => l.length);
+
+  const header = lines[0]
+    .split(',')
+    .map(s => s.trim().toLowerCase().replace(/^"|"$/g, '')); // strip quotes
+
   const stimCols = header
     .map((h, i) => ({ h, i }))
     .filter(({ h }) => /^stim[1-6]$/.test(h))
@@ -48,14 +56,26 @@ async function collectImagePathsFromCSV(csvPath) {
 
   const paths = new Set(ALWAYS_RESOURCES);
   for (let r = 1; r < lines.length; r++) {
-    const cols = lines[r].split(',');
-    stimCols.forEach(ci => {
-      const p = (cols[ci] || '').trim();
-      if (p) paths.add(p);
-    });
+    const cols = lines[r].split(',').map(s => s.trim().replace(/^"|"$/g, ''));
+    for (const ci of stimCols) {
+      const raw = cols[ci];
+      if (raw && raw.toLowerCase() !== 'default.png') paths.add(raw);
+    }
   }
   return Array.from(paths);
 }
+
+function normPath(p) {
+  if (p == null) return '';
+  p = String(p).trim();
+  if (!p) return '';
+  if (/^https?:\/\//i.test(p)) return p;
+  if (p.startsWith('resources/')) return p;
+  if (p.startsWith('images/')) return `resources/${p}`;
+  if (!p.includes('/')) return `resources/images/${p}`;
+  return `resources/${p}`;
+}
+
 
 
 
@@ -78,24 +98,33 @@ const dialogCancelScheduler = new Scheduler(psychoJS);
 
 
 (async function bootstrap() {
-  const csvPathsRaw = await collectImagePathsFromCSV(TRIALS_CSV); // returns strings from CSV
+  const csvPathsRaw = await collectImagePathsFromCSV(TRIALS_CSV);
+
   const allPaths = Array.from(new Set([
-    'resources/images/157_Chairs.png',   // fallback
+    'resources/images/157_Chairs.png',
     ...csvPathsRaw.map(normPath)
-  ]));
+  ])).filter(p => typeof p === 'string' && p.length > 0);
 
   const resources = [
-    { name: TRIALS_CSV, path: TRIALS_CSV },      // so TrialHandler can import it
-    ...allPaths.map(p => ({ name: p, path: p })),
-  ];
+    { name: TRIALS_CSV, path: TRIALS_CSV },
+    ...allPaths.map(p => ({ name: p, path: p }))
+  ].filter(r => typeof r.name === 'string' && r.name && typeof r.path === 'string' && r.path);
 
-  // 3) Schedule GUI & flow *before* start (Builder style)
+  // Optional: sanity check in the console
+  console.log('[Preload] resources count:', resources.length);
+  const bad = resources.filter(r => !r.name || !r.path);
+  if (bad.length) {
+    console.error('[Preload] Found invalid resources:', bad);
+    throw new Error('Invalid resource entries detected.');
+  }
+
   psychoJS.schedule(psychoJS.gui.DlgFromDict({ dictionary: expInfo, title: expName }));
   psychoJS.scheduleCondition(
     () => (psychoJS.gui.dialogComponent.button === 'OK'),
     flowScheduler,
     dialogCancelScheduler
   );
+
 
   flowScheduler.add(updateInfo);
   flowScheduler.add(experimentInit);
