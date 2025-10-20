@@ -18,6 +18,62 @@ let PILOTING = util.getUrlParameters().has('__pilotToken');
 const workerId = window.mturkParams?.workerId || 'local-test';
 expInfo['workerId'] = workerId;
 
+// ===== Cloud upload config =====
+const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbw2j1Bg_3q-j4rdd8dC0EAQzSZHW8cpPUFiH85OOfUdAqqHjPPQW3Fia4ROZZx93fBm0w/exec';
+
+// Escape values for CSV building when fallback is used
+function _csvEscape(v) {
+  if (v === null || v === undefined) return '';
+  const s = String(v);
+  return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+
+// Fallback builder if psychoJS.experiment.toCsv() isn't available
+function buildCsvFallback() {
+  // PsychoJS stores trial rows here in 2024+/2025+; adjust if yours differs
+  const rows = (psychoJS?.experiment?._trialsData) || [];
+  const keys = new Set();
+  rows.forEach(r => Object.keys(r).forEach(k => keys.add(k)));
+  const header = Array.from(keys);
+
+  const lines = [];
+  lines.push(header.map(_csvEscape).join(','));
+  for (const r of rows) {
+    lines.push(header.map(k => _csvEscape(r[k])).join(','));
+  }
+  return lines.join('\n');
+}
+
+// Upload the full CSV (plus MTurk IDs) to Google Sheets (Apps Script)
+async function uploadCsvToSheets() {
+  try {
+    // Prefer native toCsv if present; otherwise use fallback
+    const csvText =
+      (psychoJS?.experiment?.toCsv && psychoJS.experiment.toCsv()) ||
+      buildCsvFallback();
+
+    const payload = {
+      workerId: window.mturkParams?.workerId || 'local-test',
+      assignmentId: window.mturkParams?.assignmentId || '',
+      hitId: window.mturkParams?.hitId || '',
+      csv: csvText
+    };
+
+    const resp = await fetch(WEB_APP_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      keepalive: true
+    });
+    const j = await resp.json();
+    console.log('Sheets upload:', j);
+  } catch (e) {
+    console.warn('Upload failed:', e);
+  }
+}
+
+
+
 const ASSETS_DIR = 'resources';
 const IMG_DIR = `${ASSETS_DIR}/images`;
 const FALLBACK = `${IMG_DIR}/157_Chairs.png`;
@@ -980,10 +1036,17 @@ function importConditions(currentLoop) {
 }
 
 async function quitPsychoJS(message, isCompleted) {
+  // ensure the last row is flushed
   if (psychoJS.experiment.isEntryEmpty()) {
     psychoJS.experiment.nextEntry();
   }
+
+  // === NEW: upload full CSV to Google Sheets ===
+  await uploadCsvToSheets();
+
+  // now close everything
   psychoJS.window.close();
   psychoJS.quit({ message, isCompleted });
   return Scheduler.Event.QUIT;
 }
+
