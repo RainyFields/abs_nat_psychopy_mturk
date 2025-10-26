@@ -1,4 +1,3 @@
-here is the updated code I have and it takes forever to load:
 /***********************
  * 1Back_Category (fixed)
  * - 500 ms image, 2 s response window
@@ -13,26 +12,6 @@ const { Scheduler } = util;
 // ---- Experiment metadata ----
 let expName = '1back_category';
 let expInfo = { participant: '' };
-
-// ---- MTurk integration (Sandbox or Live) ----
-const urlParams = new URLSearchParams(window.location.search);
-let workerId     = urlParams.get('workerId')     || '';
-let assignmentId = urlParams.get('assignmentId') || '';
-let hitId        = urlParams.get('hitId')        || '';
-const submitTo   = urlParams.get('turkSubmitTo') || 'https://workersandbox.mturk.com';
-
-// If in Preview mode (no assignment yet)
-if (assignmentId === 'ASSIGNMENT_ID_NOT_AVAILABLE') {
-  alert("You are in Preview mode. Please click 'Accept HIT' on MTurk before starting.");
-}
-
-// Store in expInfo for later saving
-expInfo['workerId']     = workerId || 'local-test';
-expInfo['assignmentId'] = assignmentId || '';
-expInfo['hitId']        = hitId || '';
-expInfo['submitTo']     = submitTo;
-
-
 let PILOTING = util.getUrlParameters().has('__pilotToken');
 
 // ---- MTurk params (robust) ----
@@ -41,6 +20,56 @@ let workerId     = params.get('workerId')     || '';
 let assignmentId = params.get('assignmentId') || '';
 let hitId        = params.get('hitId')        || '';
 const isPreview  = assignmentId === 'ASSIGNMENT_ID_NOT_AVAILABLE';
+
+const turkSubmitTo = params.get('turkSubmitTo') || 'https://workersandbox.mturk.com';
+const SUBMIT_URL = `${turkSubmitTo.replace(/\/+$/,'')}/mturk/externalSubmit`;
+
+
+function generateSurveyCode(workerId, assignmentId) {
+  // short, deterministic-ish code that’s easy to read/paste
+  const base = (workerId || 'W').slice(-4).toUpperCase() + (assignmentId || 'A').slice(-4).toUpperCase();
+  const t = Date.now().toString(36).slice(-5).toUpperCase();
+  return `${base}-${t}`;
+}
+
+// Name of the survey-code field MTurk requester expects.
+// Common ones: "surveyCode", "code". We'll send several aliases to be safe.
+const SURVEY_CODE_FIELD = 'surveyCode';
+
+function submitToMTurk({ assignmentId, workerId, hitId, surveyCode }) {
+  if (!assignmentId || assignmentId === 'ASSIGNMENT_ID_NOT_AVAILABLE') {
+    // Likely Survey Link flow – cannot POST; bounce the worker back to MTurk tab.
+    const taskUrl = params.get('returnUrl') || window.document.referrer || turkSubmitTo;
+    alert(`Copy this code and paste it on MTurk:\n\n${surveyCode}\n\nWe'll open the MTurk tab next.`);
+    try { window.open(taskUrl, '_blank'); } catch {}
+    return;
+  }
+
+  // External Question flow: auto-submit a POST back to MTurk
+  const form = document.createElement('form');
+  form.method = 'POST';
+  form.action = SUBMIT_URL;
+
+  const add = (name, value) => {
+    const inp = document.createElement('input');
+    inp.type = 'hidden'; inp.name = name; inp.value = value ?? '';
+    form.appendChild(inp);
+  };
+
+  add('assignmentId', assignmentId);
+  add('workerId', workerId);
+  add('hitId', hitId);
+
+  // send multiple aliases to cover the Requester's expected field
+  add(SURVEY_CODE_FIELD, surveyCode);
+  add('code', surveyCode);
+  add('surveycode', surveyCode);
+
+  document.body.appendChild(form);
+  form.submit();
+}
+
+
 
 // Optional: simple Worker ID sanity (MTurk IDs are alphanumeric, typically 8+ chars)
 function looksLikeWorkerId(s) {
@@ -545,6 +574,8 @@ finished uploading (this may take a few seconds).`,
     wrapWidth: 1.2,
     depth: 0.0
   });
+  let FINAL_SURVEY_CODE = '';
+
   thanksKey = new core.Keyboard({ psychoJS, clock: new util.Clock(), waitForStart: true });
 
   return Scheduler.Event.NEXT;
@@ -1329,31 +1360,37 @@ async function quitPsychoJS(message, isCompleted) {
   if (psychoJS.experiment.isEntryEmpty()) {
     psychoJS.experiment.nextEntry();
   }
+
+  // Try uploading results first
   try {
     const csv = buildCsvFromExperiment();
     const meta = {
-      workerId: expInfo?.workerId || 'local-test',
+      workerId:     expInfo?.workerId || '',
       assignmentId: expInfo?.assignmentId || '',
-      hitId: expInfo?.hitId || '',
-      participant: expInfo?.participant || '',
-      timestamp: new Date().toISOString(),
+      hitId:        expInfo?.hitId || '',
+      participant:  expInfo?.participant || '',
+      timestamp:    new Date().toISOString(),
     };
     await uploadCsvToSheets(csv, meta);
   } catch (e) {
     console.error('Sheets upload error:', e);
+    // continue anyway; we still want to submit/return to MTurk
   }
 
-  // === Redirect back to MTurk for submission ===
-  const params = new URLSearchParams(window.location.search);
-  const assignmentId = params.get('assignmentId');
-  const submitTo = params.get('turkSubmitTo') || 'https://workersandbox.mturk.com';
-  const completionCode = 'AWDR'; // ← your actual survey code
-  if (assignmentId && assignmentId !== 'ASSIGNMENT_ID_NOT_AVAILABLE') {
-    const submitURL = `${submitTo}/mturk/externalSubmit?assignmentId=${assignmentId}&surveycode=${completionCode}`;
-    window.location.href = submitURL;
-  } else {
-    // fallback: local testing
-    alert(`Experiment complete! Your survey code is: ${completionCode}`);
+  // Submit / fallback to MTurk with the code (External Question auto-submits)
+  try {
+    const code = (typeof FINAL_SURVEY_CODE === 'string' && FINAL_SURVEY_CODE) ?
+      FINAL_SURVEY_CODE :
+      generateSurveyCode(expInfo?.workerId, expInfo?.assignmentId);
+
+    submitToMTurk({
+      assignmentId: expInfo?.assignmentId,
+      workerId: expInfo?.workerId,
+      hitId: expInfo?.hitId,
+      surveyCode: code
+    });
+  } catch (e) {
+    console.error('MTurk submit fallback error:', e);
   }
 
   psychoJS.window.close();
