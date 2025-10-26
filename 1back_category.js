@@ -1,8 +1,7 @@
 /***********************
  * 1Back_Category (fixed)
  * - 500 ms image, 2 s response window
- * - Minimal preload for fast startup (CSV + fallback only)
- * - MTurk IDs captured; redirects back to MTurk on finish
+ * - Validates image paths to avoid preload crashes
  ***********************/
 
 import { core, data, sound, util, visual, hardware } from './lib/psychojs-2025.1.1.js';
@@ -13,50 +12,83 @@ const { Scheduler } = util;
 // ---- Experiment metadata ----
 let expName = '1back_category';
 let expInfo = { participant: '' };
-let PILOTING = util.getUrlParameters().has('__pilotToken');
 
 // ---- MTurk integration (Sandbox or Live) ----
+const urlParams = new URLSearchParams(window.location.search);
+let workerId     = urlParams.get('workerId')     || '';
+let assignmentId = urlParams.get('assignmentId') || '';
+let hitId        = urlParams.get('hitId')        || '';
+const submitTo   = urlParams.get('turkSubmitTo') || 'https://workersandbox.mturk.com';
+
+// If in Preview mode (no assignment yet)
+if (assignmentId === 'ASSIGNMENT_ID_NOT_AVAILABLE') {
+  alert("You are in Preview mode. Please click 'Accept HIT' on MTurk before starting.");
+}
+
+// Store in expInfo for later saving
+expInfo['workerId']     = workerId || 'local-test';
+expInfo['assignmentId'] = assignmentId || '';
+expInfo['hitId']        = hitId || '';
+expInfo['submitTo']     = submitTo;
+
+
+let PILOTING = util.getUrlParameters().has('__pilotToken');
+
+// ---- MTurk params (robust) ----
 const params = new URLSearchParams(window.location.search);
 let workerId     = params.get('workerId')     || '';
 let assignmentId = params.get('assignmentId') || '';
 let hitId        = params.get('hitId')        || '';
-const submitTo   = params.get('turkSubmitTo') || 'https://workersandbox.mturk.com';
 const isPreview  = assignmentId === 'ASSIGNMENT_ID_NOT_AVAILABLE';
 
-// Optional: simple Worker ID sanity
-function looksLikeWorkerId(s) { return typeof s === 'string' && /^[A-Za-z0-9]{8,}$/.test(s); }
-
-if (isPreview) {
-  alert("You are in Preview mode. Please click 'Accept HIT' on MTurk before starting.");
+// Optional: simple Worker ID sanity (MTurk IDs are alphanumeric, typically 8+ chars)
+function looksLikeWorkerId(s) {
+  return typeof s === 'string' && /^[A-Za-z0-9]{8,}$/.test(s);
 }
 
-// Fallback prompt only if no workerId (direct link / debug)
+// If Preview, show a blocking message (before Welcome) and stop
+if (isPreview) {
+  alert(
+    "You are viewing this HIT in Preview mode.\n\n" +
+    "Please go back to MTurk, click 'Accept HIT', and then reopen the task. " +
+    "We cannot record participation or pay in Preview."
+  );
+  // Optional: hard-stop the app if you prefer:
+  // throw new Error("Preview mode - stop experiment.");
+}
+
+// Fallback prompt only if no workerId (e.g., direct link / debug)
 if (!workerId) {
   const entered = window.prompt("Please enter your MTurk Worker ID (e.g., A1ABC23DEF45G):", "");
   if (entered && looksLikeWorkerId(entered)) workerId = entered.trim();
 }
 
-// Store for logging + export
-expInfo.workerId     = workerId || 'local-test';
-expInfo.assignmentId = assignmentId || '';
-expInfo.hitId        = hitId || '';
-expInfo.submitTo     = submitTo;
+// Store in expInfo for logging + export
+expInfo['workerId']     = workerId || 'local-test';
+expInfo['assignmentId'] = assignmentId || '';
+expInfo['hitId']        = hitId || '';
 
 
-// ---------- CSV helpers ----------
+// Escape values for CSV building when fallback is used
 function _csvEscape(v) {
   if (v === null || v === undefined) return '';
   const s = String(v);
   return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
 }
 
-function buildCsvFromExperiment() {
-  const rows = psychoJS?.experiment?._trialsData || [];
+// Fallback builder if psychoJS.experiment.toCsv() isn't available
+function buildCsvFallback() {
+  // PsychoJS stores trial rows here in 2024+/2025+; adjust if yours differs
+  const rows = (psychoJS?.experiment?._trialsData) || [];
   const keys = new Set();
   rows.forEach(r => Object.keys(r).forEach(k => keys.add(k)));
   const header = Array.from(keys);
-  const lines = [header.map(_csvEscape).join(',')];
-  for (const r of rows) lines.push(header.map(k => _csvEscape(r[k])).join(','));
+
+  const lines = [];
+  lines.push(header.map(_csvEscape).join(','));
+  for (const r of rows) {
+    lines.push(header.map(k => _csvEscape(r[k])).join(','));
+  }
   return lines.join('\n');
 }
 
@@ -74,6 +106,16 @@ async function uploadCsvToSheets(csv, meta) {
   return json;
 }
 
+function buildCsvFromExperiment() {
+  const rows = psychoJS?.experiment?._trialsData || [];
+  const keys = new Set();
+  rows.forEach(r => Object.keys(r).forEach(k => keys.add(k)));
+  const header = Array.from(keys);
+  const lines = [header.map(_csvEscape).join(',')];
+  for (const r of rows) lines.push(header.map(k => _csvEscape(r[k])).join(','));
+  return lines.join('\n');
+}
+
 async function finalizeAndSave(psychoJS, expInfo) {
   const csv = buildCsvFromExperiment();
   const meta = {
@@ -87,13 +129,46 @@ async function finalizeAndSave(psychoJS, expInfo) {
   console.log('Sheets upload OK');
 }
 
-// ---------- Assets ----------
 const ASSETS_DIR = 'resources';
 const IMG_DIR = `${ASSETS_DIR}/images`;
 const FALLBACK = `${IMG_DIR}/157_Chairs.png`;
-const TRIALS_CSV = 'resources/1back_category_trials.csv';
 
-// Normalize relative/absolute paths
+// --- Resource preload (collect from CSV + add fallback) ---
+const TRIALS_CSV = 'resources/1back_category_trials.csv';
+const ALWAYS_RESOURCES = ['resources/images/157_Chairs.png']; // fallback
+
+async function collectImagePathsFromCSV(csvPath) {
+  const res = await fetch(csvPath, { cache: 'no-store' });
+  if (!res.ok) throw new Error(`Failed to load ${csvPath}: ${res.status}`);
+  // Handle BOM + normalize line endings
+  let text = await res.text();
+  if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+
+  const lines = text
+    .split(/\r?\n/)
+    .map(l => l.trim())
+    .filter(l => l.length);
+
+  const header = lines[0]
+    .split(',')
+    .map(s => s.trim().toLowerCase().replace(/^"|"$/g, '')); // strip quotes
+
+  const stimCols = header
+    .map((h, i) => ({ h, i }))
+    .filter(({ h }) => /^stim[1-6]$/.test(h))
+    .map(({ i }) => i);
+
+  const paths = new Set(ALWAYS_RESOURCES);
+  for (let r = 1; r < lines.length; r++) {
+    const cols = lines[r].split(',').map(s => s.trim().replace(/^"|"$/g, ''));
+    for (const ci of stimCols) {
+      const raw = cols[ci];
+      if (raw && raw.toLowerCase() !== 'default.png') paths.add(raw);
+    }
+  }
+  return Array.from(paths);
+}
+
 function normPath(p) {
   if (p == null) return '';
   p = String(p).trim();
@@ -122,11 +197,25 @@ const flowScheduler = new Scheduler(psychoJS);
 const dialogCancelScheduler = new Scheduler(psychoJS);
 
 (async function bootstrap() {
-  // 🚀 Minimal preload: CSV + fallback (fast startup)
+  const csvPathsRaw = await collectImagePathsFromCSV(TRIALS_CSV);
+
+  const allPaths = Array.from(new Set([
+    'resources/images/157_Chairs.png',
+    ...csvPathsRaw.map(normPath)
+  ])).filter(p => typeof p === 'string' && p.length > 0);
+
   const resources = [
     { name: TRIALS_CSV, path: TRIALS_CSV },
-    { name: FALLBACK,   path: FALLBACK }
-  ];
+    ...allPaths.map(p => ({ name: p, path: p }))
+  ].filter(r => typeof r.name === 'string' && r.name && typeof r.path === 'string' && r.path);
+
+  // Optional: sanity check in the console
+  console.log('[Preload] resources count:', resources.length);
+  const bad = resources.filter(r => !r.name || !r.path);
+  if (bad.length) {
+    console.error('[Preload] Found invalid resources:', bad);
+    throw new Error('Invalid resource entries detected.');
+  }
 
   psychoJS.schedule(psychoJS.gui.DlgFromDict({ dictionary: expInfo, title: expName }));
   psychoJS.scheduleCondition(
@@ -161,6 +250,7 @@ const dialogCancelScheduler = new Scheduler(psychoJS);
 
   dialogCancelScheduler.add(quitPsychoJS, '', false);
 
+  // Start WITH resources so they’re preloaded
   psychoJS.start({ expName, expInfo, resources });
   psychoJS.experimentLogger.setLevel(core.Logger.ServerLevel.EXP);
 })();
@@ -372,7 +462,7 @@ async function experimentInit() {
   img = new visual.ImageStim({
     win: psychoJS.window,
     name: 'img',
-    image: FALLBACK,             // use fallback initially
+    image: 'resources/images/157_Chairs.png',
     anchor: 'center',
     ori: 0.0,
     pos: [0, 0],
@@ -1001,9 +1091,9 @@ function FrameRoutineBegin(snapshot) {
       continueRoutine = false;
     } else {
       const rawStim = stimPaths[frameIdx];
-      const fallbackStim = FALLBACK;
+      const fallbackStim = 'resources/images/157_Chairs.png';
       currStim = normPath(rawStim) || fallbackStim;
-      img.setImage(currStim); // will lazy-load if not cached
+      img.setImage(currStim);
 
       psychoJS.eventManager.clearEvents();
     }
@@ -1241,11 +1331,11 @@ async function quitPsychoJS(message, isCompleted) {
   try {
     const csv = buildCsvFromExperiment();
     const meta = {
-      workerId:     expInfo?.workerId || 'local-test',
+      workerId: expInfo?.workerId || 'local-test',
       assignmentId: expInfo?.assignmentId || '',
-      hitId:        expInfo?.hitId || '',
-      participant:  expInfo?.participant || '',
-      timestamp:    new Date().toISOString(),
+      hitId: expInfo?.hitId || '',
+      participant: expInfo?.participant || '',
+      timestamp: new Date().toISOString(),
     };
     await uploadCsvToSheets(csv, meta);
   } catch (e) {
@@ -1253,12 +1343,12 @@ async function quitPsychoJS(message, isCompleted) {
   }
 
   // === Redirect back to MTurk for submission ===
-  const p = new URLSearchParams(window.location.search);
-  const aId = p.get('assignmentId');
-  const sTo = p.get('turkSubmitTo') || 'https://workersandbox.mturk.com';
+  const params = new URLSearchParams(window.location.search);
+  const assignmentId = params.get('assignmentId');
+  const submitTo = params.get('turkSubmitTo') || 'https://workersandbox.mturk.com';
   const completionCode = 'AWDR'; // ← your actual survey code
-  if (aId && aId !== 'ASSIGNMENT_ID_NOT_AVAILABLE') {
-    const submitURL = `${sTo}/mturk/externalSubmit?assignmentId=${aId}&surveycode=${completionCode}`;
+  if (assignmentId && assignmentId !== 'ASSIGNMENT_ID_NOT_AVAILABLE') {
+    const submitURL = `${submitTo}/mturk/externalSubmit?assignmentId=${assignmentId}&surveycode=${completionCode}`;
     window.location.href = submitURL;
   } else {
     // fallback: local testing
@@ -1269,3 +1359,4 @@ async function quitPsychoJS(message, isCompleted) {
   psychoJS.quit({ message, isCompleted });
   return Scheduler.Event.QUIT;
 }
+
