@@ -11,18 +11,12 @@ const { Scheduler } = util;
 
 // ---- Experiment metadata ----
 let expName = '1back_category';
-let expInfo = { participant: '' };
+let expInfo = {
+  workerId:   '',           // <— NEW: user will type Worker ID here
+  mturkLink:  ''            // <— NEW: user will paste MTurk worker page URL here
+};
 let PILOTING = util.getUrlParameters().has('__pilotToken');
 
-// ---- MTurk params (robust) ----
-const params = new URLSearchParams(window.location.search);
-let workerId     = params.get('workerId')     || '';
-let assignmentId = params.get('assignmentId') || '';
-let hitId        = params.get('hitId')        || '';
-const isPreview  = assignmentId === 'ASSIGNMENT_ID_NOT_AVAILABLE';
-
-const turkSubmitTo = params.get('turkSubmitTo') || 'https://workersandbox.mturk.com';
-const SUBMIT_URL = `${turkSubmitTo.replace(/\/+$/,'')}/mturk/externalSubmit`;
 
 
 function generateSurveyCode(workerId, assignmentId) {
@@ -31,72 +25,6 @@ function generateSurveyCode(workerId, assignmentId) {
   const t = Date.now().toString(36).slice(-5).toUpperCase();
   return `${base}-${t}`;
 }
-
-// Name of the survey-code field MTurk requester expects.
-// Common ones: "surveyCode", "code". We'll send several aliases to be safe.
-const SURVEY_CODE_FIELD = 'surveyCode';
-
-function submitToMTurk({ assignmentId, workerId, hitId, surveyCode }) {
-  if (!assignmentId || assignmentId === 'ASSIGNMENT_ID_NOT_AVAILABLE') {
-    // Likely Survey Link flow – cannot POST; bounce the worker back to MTurk tab.
-    const taskUrl = params.get('returnUrl') || window.document.referrer || turkSubmitTo;
-    alert(`Copy this code and paste it on MTurk:\n\n${surveyCode}\n\nWe'll open the MTurk tab next.`);
-    try { window.open(taskUrl, '_blank'); } catch {}
-    return;
-  }
-
-  // External Question flow: auto-submit a POST back to MTurk
-  const form = document.createElement('form');
-  form.method = 'POST';
-  form.action = SUBMIT_URL;
-
-  const add = (name, value) => {
-    const inp = document.createElement('input');
-    inp.type = 'hidden'; inp.name = name; inp.value = value ?? '';
-    form.appendChild(inp);
-  };
-
-  add('assignmentId', assignmentId);
-  add('workerId', workerId);
-  add('hitId', hitId);
-
-  // send multiple aliases to cover the Requester's expected field
-  add(SURVEY_CODE_FIELD, surveyCode);
-  add('code', surveyCode);
-  add('surveycode', surveyCode);
-
-  document.body.appendChild(form);
-  form.submit();
-}
-
-
-
-// Optional: simple Worker ID sanity (MTurk IDs are alphanumeric, typically 8+ chars)
-function looksLikeWorkerId(s) {
-  return typeof s === 'string' && /^[A-Za-z0-9]{8,}$/.test(s);
-}
-
-// If Preview, show a blocking message (before Welcome) and stop
-if (isPreview) {
-  alert(
-    "You are viewing this HIT in Preview mode.\n\n" +
-    "Please go back to MTurk, click 'Accept HIT', and then reopen the task. " +
-    "We cannot record participation or pay in Preview."
-  );
-  // Optional: hard-stop the app if you prefer:
-  // throw new Error("Preview mode - stop experiment.");
-}
-
-// Fallback prompt only if no workerId (e.g., direct link / debug)
-if (!workerId) {
-  const entered = window.prompt("Please enter your MTurk Worker ID (e.g., A1ABC23DEF45G):", "");
-  if (entered && looksLikeWorkerId(entered)) workerId = entered.trim();
-}
-
-// Store in expInfo for logging + export
-expInfo['workerId']     = workerId || 'local-test';
-expInfo['assignmentId'] = assignmentId || '';
-expInfo['hitId']        = hitId || '';
 
 
 // Escape values for CSV building when fallback is used
@@ -157,6 +85,12 @@ async function finalizeAndSave(psychoJS, expInfo) {
   };
   await uploadCsvToSheets(csv, meta);
   console.log('Sheets upload OK');
+  console.log('[Upload meta]', {
+  workerId: expInfo?.workerId,
+  assignmentId: expInfo?.assignmentId,
+  hitId: expInfo?.hitId
+});
+
 }
 
 const ASSETS_DIR = 'resources';
@@ -406,13 +340,13 @@ async function updateInfo() {
     ? 1.0 / Math.round(expInfo['frameRate'])
     : 1.0 / 60.0;
 
+  // This may import URL params into expInfo
   util.addInfoFromUrl(expInfo);
 
-  psychoJS.experiment.dataFileName = (("." + "/") + `data/${expInfo["participant"]}_${expName}_${expInfo["date"]}`);
-  psychoJS.experiment.field_separator = '\t';
 
   return Scheduler.Event.NEXT;
 }
+
 
 // =========================
 var WelcomeClock;
@@ -528,11 +462,7 @@ async function experimentInit() {
     win: psychoJS.window,
     name: 'welcomeText',
     text:
-`Before you start:
-1) If you came here from MTurk and clicked "Accept HIT", you don't need to type anything—your MTurk IDs are attached automatically.
-2) If prompted for your MTurk Worker ID, paste your Worker ID (e.g., A1ABC23DEF45G). Do NOT paste your name or email.
-3) If you're seeing this via MTurk Preview (ASSIGNMENT_ID_NOT_AVAILABLE), please go back and click "Accept HIT" first.
-
+`
 Task instructions:
 • You will complete a 1-back category task.
 • Each trial contains 6 images (frames). Starting from the 2nd frame, press:
@@ -562,12 +492,12 @@ Press Enter to start.`,
     text:
 `Thank you for participating!
 
-Please submit the MTurk survey code shown on the MTurk page (if provided by the requester).
+Please submit the following survey code on the MTurk page before submit: AWDR
 
 Press Enter to finish.
 
 Important: after you press Enter, do not close this page until the data file has
-finished uploading (this may take a few seconds).`,
+finished uploading (this may take a few seconds / you might have to press Enter multiple times). Please wait until you see next frame`,
     font: 'Open Sans',
     pos: [0, 0], draggable: false, height: 0.05,
     color: new util.Color('white'),
@@ -1377,21 +1307,7 @@ async function quitPsychoJS(message, isCompleted) {
     // continue anyway; we still want to submit/return to MTurk
   }
 
-  // Submit / fallback to MTurk with the code (External Question auto-submits)
-  try {
-    const code = (typeof FINAL_SURVEY_CODE === 'string' && FINAL_SURVEY_CODE) ?
-      FINAL_SURVEY_CODE :
-      generateSurveyCode(expInfo?.workerId, expInfo?.assignmentId);
-
-    submitToMTurk({
-      assignmentId: expInfo?.assignmentId,
-      workerId: expInfo?.workerId,
-      hitId: expInfo?.hitId,
-      surveyCode: code
-    });
-  } catch (e) {
-    console.error('MTurk submit fallback error:', e);
-  }
+  
 
   psychoJS.window.close();
   psychoJS.quit({ message, isCompleted });
