@@ -497,7 +497,7 @@ Please submit the following survey code on the MTurk page before submit: AWDR
 Press Enter to finish.
 
 Important: after you press Enter, do not close this page until the data file has
-finished uploading (this may take a few seconds / you might have to press Enter multiple times). Please wait until you see next frame`,
+finished uploading (this may take a few seconds / you might have to press Enter multiple times). Please wait until you see next page`,
     font: 'Open Sans',
     pos: [0, 0], draggable: false, height: 0.05,
     color: new util.Color('white'),
