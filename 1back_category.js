@@ -1,3 +1,4 @@
+here is the updated code I have and it takes forever to load:
 /***********************
  * 1Back_Category (fixed)
  * - 500 ms image, 2 s response window
@@ -12,6 +13,26 @@ const { Scheduler } = util;
 // ---- Experiment metadata ----
 let expName = '1back_category';
 let expInfo = { participant: '' };
+
+// ---- MTurk integration (Sandbox or Live) ----
+const urlParams = new URLSearchParams(window.location.search);
+let workerId     = urlParams.get('workerId')     || '';
+let assignmentId = urlParams.get('assignmentId') || '';
+let hitId        = urlParams.get('hitId')        || '';
+const submitTo   = urlParams.get('turkSubmitTo') || 'https://workersandbox.mturk.com';
+
+// If in Preview mode (no assignment yet)
+if (assignmentId === 'ASSIGNMENT_ID_NOT_AVAILABLE') {
+  alert("You are in Preview mode. Please click 'Accept HIT' on MTurk before starting.");
+}
+
+// Store in expInfo for later saving
+expInfo['workerId']     = workerId || 'local-test';
+expInfo['assignmentId'] = assignmentId || '';
+expInfo['hitId']        = hitId || '';
+expInfo['submitTo']     = submitTo;
+
+
 let PILOTING = util.getUrlParameters().has('__pilotToken');
 
 // ---- MTurk params (robust) ----
@@ -1311,15 +1332,28 @@ async function quitPsychoJS(message, isCompleted) {
   try {
     const csv = buildCsvFromExperiment();
     const meta = {
-      workerId:     expInfo?.workerId || '',
+      workerId: expInfo?.workerId || 'local-test',
       assignmentId: expInfo?.assignmentId || '',
-      hitId:        expInfo?.hitId || '',
-      participant:  expInfo?.participant || '',
-      timestamp:    new Date().toISOString(),
+      hitId: expInfo?.hitId || '',
+      participant: expInfo?.participant || '',
+      timestamp: new Date().toISOString(),
     };
     await uploadCsvToSheets(csv, meta);
   } catch (e) {
     console.error('Sheets upload error:', e);
+  }
+
+  // === Redirect back to MTurk for submission ===
+  const params = new URLSearchParams(window.location.search);
+  const assignmentId = params.get('assignmentId');
+  const submitTo = params.get('turkSubmitTo') || 'https://workersandbox.mturk.com';
+  const completionCode = 'AWDR'; // ← your actual survey code
+  if (assignmentId && assignmentId !== 'ASSIGNMENT_ID_NOT_AVAILABLE') {
+    const submitURL = `${submitTo}/mturk/externalSubmit?assignmentId=${assignmentId}&surveycode=${completionCode}`;
+    window.location.href = submitURL;
+  } else {
+    // fallback: local testing
+    alert(`Experiment complete! Your survey code is: ${completionCode}`);
   }
 
   psychoJS.window.close();
