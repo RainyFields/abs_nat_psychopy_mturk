@@ -14,12 +14,86 @@ let expName = '1back_category';
 let expInfo = { participant: '' };
 let PILOTING = util.getUrlParameters().has('__pilotToken');
 
-// ---- MTurk params (robust) ----
+// ---- MTurk params (robust, non-blocking) ----
 const params = new URLSearchParams(window.location.search);
-let workerId     = params.get('workerId')     || '';
-let assignmentId = params.get('assignmentId') || '';
-let hitId        = params.get('hitId')        || '';
-const isPreview  = assignmentId === 'ASSIGNMENT_ID_NOT_AVAILABLE';
+const assignmentId = params.get('assignmentId') || '';
+const isPreview = assignmentId === 'ASSIGNMENT_ID_NOT_AVAILABLE';
+
+// Avoid prompt/alert in iframe: synthesize safe defaults
+let workerId = params.get('workerId') || '';
+let hitId = params.get('hitId') || '';
+
+if (!workerId) workerId = `preview-${Date.now()}`;  // do NOT block
+
+// ---- MTurk params (add turkSubmitTo + safe default) ----
+const params = new URLSearchParams(window.location.search);
+const assignmentId = params.get('assignmentId') || '';
+const workerId     = params.get('workerId')     || '';
+const hitId        = params.get('hitId')        || '';
+const turkSubmitTo = params.get('turkSubmitTo') || 'https://workersandbox.mturk.com';
+
+// Auto-submit back to MTurk (posts to top frame)
+function autoSubmitToMTurk({ assignmentId, code, extras = {} }) {
+  if (!assignmentId || assignmentId === 'ASSIGNMENT_ID_NOT_AVAILABLE') {
+    console.warn('Preview mode or missing assignmentId — not submitting to MTurk.');
+    return;
+  }
+  const action = `${turkSubmitTo.replace(/\/$/, '')}/mturk/externalSubmit`;
+
+  const form = document.createElement('form');
+  form.method = 'POST';
+  form.action = action;
+  form.target = '_top';  // <- critical so it escapes the iframe
+
+  // Required field
+  const a = document.createElement('input');
+  a.type = 'hidden';
+  a.name = 'assignmentId';
+  a.value = assignmentId;
+  form.appendChild(a);
+
+  // Your completion code (use the exact name you expect in Results; common choices)
+  const c1 = document.createElement('input');
+  c1.type = 'hidden';
+  c1.name = 'surveyCode';
+  c1.value = code || '';
+  form.appendChild(c1);
+
+  // (Optional) Add some aliases MTurk requesters often use
+  const c2 = document.createElement('input');
+  c2.type = 'hidden';
+  c2.name = 'code';
+  c2.value = code || '';
+  form.appendChild(c2);
+
+  // (Optional) include helpful extras you want saved in the CSV
+  for (const [k, v] of Object.entries(extras)) {
+    const inp = document.createElement('input');
+    inp.type = 'hidden';
+    inp.name = k;
+    inp.value = String(v ?? '');
+    form.appendChild(inp);
+  }
+
+  document.body.appendChild(form);
+  form.submit();
+}
+
+
+function makeCompletionCode(workerId) {
+  // Simple deterministic-ish code (customize as you like)
+  const raw = `${workerId}-${Date.now()}`;
+  // Short base36
+  return `C${Math.abs([...raw].reduce((h,c)=>((h<<5)-h+c.charCodeAt(0))|0,0)).toString(36).slice(0,8).toUpperCase()}`;
+}
+
+
+expInfo.workerId = workerId;
+expInfo.assignmentId = assignmentId;
+expInfo.hitId = hitId;
+expInfo.surveyCode = expInfo.surveyCode || makeCompletionCode(workerId);
+
+
 
 // Optional: simple Worker ID sanity (MTurk IDs are alphanumeric, typically 8+ chars)
 function looksLikeWorkerId(s) {
@@ -339,6 +413,39 @@ function ThanksRoutineEnd(snapshot) {
     routineTimer.reset();
 
     if (currentLoop === psychoJS.experiment) psychoJS.experiment.nextEntry(snapshot);
+    // Ensure there is a code
+    expInfo.surveyCode = expInfo.surveyCode || makeCompletionCode(expInfo.workerId);
+
+    // 1) Upload results first
+    try {
+      const csv = buildCsvFromExperiment();
+      const meta = {
+        workerId:     expInfo.workerId || '',
+        assignmentId: expInfo.assignmentId || '',
+        hitId:        expInfo.hitId || '',
+        participant:  expInfo.participant || '',
+        surveyCode:   expInfo.surveyCode || '',
+        timestamp:    new Date().toISOString(),
+      };
+      await uploadCsvToSheets(csv, meta);
+      console.log('Sheets upload OK (final).');
+    } catch (e) {
+      console.error('Final Sheets upload error:', e);
+      // You can still proceed to submit to MTurk even if upload fails.
+    }
+
+    // 2) Auto-submit back to MTurk (top frame) with the same code
+    autoSubmitToMTurk({
+      assignmentId: expInfo.assignmentId,
+      code: expInfo.surveyCode,
+      extras: {
+        workerId: expInfo.workerId || '',
+        hitId: expInfo.hitId || '',
+      }
+    });
+
+    // IMPORTANT: Do NOT immediately close the window here; the navigation will replace it.
+    // If you also call psychoJS.quit, do it only when NOT on MTurk.
     return Scheduler.Event.NEXT;
   };
 }
@@ -713,6 +820,16 @@ function WelcomeRoutineBegin(snapshot) {
     WelcomeComponents = [welcomeText, welcomeKey];
     WelcomeComponents.forEach(c => { if ('status' in c) c.status = PsychoJS.Status.NOT_STARTED; });
 
+    // In WelcomeRoutineBegin() after setting up components:
+    if (isPreview) {
+      welcomeText.setText(
+        "You are viewing this HIT in PREVIEW.\n\n" +
+        "Please go back to MTurk, click 'Accept HIT', then reopen the task.\n\n" +
+        "Press Enter to exit."
+      );
+    }
+
+
     return Scheduler.Event.NEXT;
   };
 }
@@ -778,6 +895,12 @@ function WelcomeRoutineEnd(snapshot) {
     }
     welcomeKey.stop();
     routineTimer.reset();
+
+    // After capturing Enter
+    if (isPreview) {
+      // Early clean exit (no data collection)
+      return quitPsychoJS("Preview mode — exiting.", false);
+    }
 
     if (currentLoop === psychoJS.experiment) psychoJS.experiment.nextEntry(snapshot);
     return Scheduler.Event.NEXT;
@@ -1320,6 +1443,16 @@ async function quitPsychoJS(message, isCompleted) {
     await uploadCsvToSheets(csv, meta);
   } catch (e) {
     console.error('Sheets upload error:', e);
+  }
+
+    // If we’re in a real assignment, redirect to MTurk instead of closing
+  if (assignmentId && assignmentId !== 'ASSIGNMENT_ID_NOT_AVAILABLE') {
+    autoSubmitToMTurk({
+      assignmentId,
+      code: expInfo.surveyCode || makeCompletionCode(workerId),
+      extras: { workerId, hitId }
+    });
+    return Scheduler.Event.QUIT; // allow the navigation to proceed
   }
 
   psychoJS.window.close();
