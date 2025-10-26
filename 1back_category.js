@@ -14,9 +14,39 @@ let expName = '1back_category';
 let expInfo = { participant: '' };
 let PILOTING = util.getUrlParameters().has('__pilotToken');
 
-// ---- Read MTurk ID ----
-const workerId = window.mturkParams?.workerId || 'local-test';
-expInfo['workerId'] = workerId;
+// ---- MTurk params (robust) ----
+const params = new URLSearchParams(window.location.search);
+let workerId     = params.get('workerId')     || '';
+let assignmentId = params.get('assignmentId') || '';
+let hitId        = params.get('hitId')        || '';
+const isPreview  = assignmentId === 'ASSIGNMENT_ID_NOT_AVAILABLE';
+
+// Optional: simple Worker ID sanity (MTurk IDs are alphanumeric, typically 8+ chars)
+function looksLikeWorkerId(s) {
+  return typeof s === 'string' && /^[A-Za-z0-9]{8,}$/.test(s);
+}
+
+// If Preview, show a blocking message (before Welcome) and stop
+if (isPreview) {
+  alert(
+    "You are viewing this HIT in Preview mode.\n\n" +
+    "Please go back to MTurk, click 'Accept HIT', and then reopen the task. " +
+    "We cannot record participation or pay in Preview."
+  );
+  // Optional: hard-stop the app if you prefer:
+  // throw new Error("Preview mode - stop experiment.");
+}
+
+// Fallback prompt only if no workerId (e.g., direct link / debug)
+if (!workerId) {
+  const entered = window.prompt("Please enter your MTurk Worker ID (e.g., A1ABC23DEF45G):", "");
+  if (entered && looksLikeWorkerId(entered)) workerId = entered.trim();
+}
+
+// Store in expInfo for logging + export
+expInfo['workerId']     = workerId || 'local-test';
+expInfo['assignmentId'] = assignmentId || '';
+expInfo['hitId']        = hitId || '';
 
 
 // Escape values for CSV building when fallback is used
@@ -45,9 +75,8 @@ function buildCsvFallback() {
 // ===== Cloud upload config =====
 const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbx43V8Aha-JTWTKj51PHQo5SkQztRsV0EYfyAsULh2-NQeFcC1Y8k6wYyhO0_5b_p2amg/exec';
 
-
 async function uploadCsvToSheets(csv, meta) {
-  const res = await fetch(WEB_APP_URL, {    // now matches your const above
+  const res = await fetch(WEB_APP_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // no preflight
     body: JSON.stringify({ csv, meta }),
@@ -56,8 +85,6 @@ async function uploadCsvToSheets(csv, meta) {
   if (!json.ok) throw new Error(json.error || 'Sheets upload failed');
   return json;
 }
-
-
 
 function buildCsvFromExperiment() {
   const rows = psychoJS?.experiment?._trialsData || [];
@@ -69,35 +96,22 @@ function buildCsvFromExperiment() {
   return lines.join('\n');
 }
 
-
-
 async function finalizeAndSave(psychoJS, expInfo) {
   const csv = buildCsvFromExperiment();
   const meta = {
-    workerId: window.mturkParams?.workerId || 'local-test',
-    participant: expInfo?.participant || '',
-    timestamp: new Date().toISOString(),
+    workerId:     expInfo?.workerId || '',
+    assignmentId: expInfo?.assignmentId || '',
+    hitId:        expInfo?.hitId || '',
+    participant:  expInfo?.participant || '',
+    timestamp:    new Date().toISOString(),
   };
   await uploadCsvToSheets(csv, meta);
   console.log('Sheets upload OK');
 }
 
-
-
 const ASSETS_DIR = 'resources';
 const IMG_DIR = `${ASSETS_DIR}/images`;
 const FALLBACK = `${IMG_DIR}/157_Chairs.png`;
-
-// function normPath(p) {
-//   if (!p) return '';
-//   p = String(p).trim();
-//   if (!p) return '';
-//   if (/^https?:\/\//i.test(p)) return p;               // absolute URL
-//   if (p.startsWith(`${ASSETS_DIR}/`)) return p;         // already ok
-//   if (p.startsWith('images/')) return `${ASSETS_DIR}/${p}`; // images/... -> resources/images/...
-//   if (!p.includes('/')) return `${IMG_DIR}/${p}`;       // bare filename
-//   return `${ASSETS_DIR}/${p}`;                          // any other relative
-// }
 
 // --- Resource preload (collect from CSV + add fallback) ---
 const TRIALS_CSV = 'resources/1back_category_trials.csv';
@@ -146,9 +160,6 @@ function normPath(p) {
   return `resources/${p}`;
 }
 
-
-
-
 // ---- init psychoJS ----
 const psychoJS = new PsychoJS({ debug: true });
 
@@ -164,8 +175,6 @@ psychoJS.openWindow({
 
 const flowScheduler = new Scheduler(psychoJS);
 const dialogCancelScheduler = new Scheduler(psychoJS);
-
-
 
 (async function bootstrap() {
   const csvPathsRaw = await collectImagePathsFromCSV(TRIALS_CSV);
@@ -195,28 +204,36 @@ const dialogCancelScheduler = new Scheduler(psychoJS);
     dialogCancelScheduler
   );
 
-
   flowScheduler.add(updateInfo);
   flowScheduler.add(experimentInit);
+
+  // Welcome/instructions
+  flowScheduler.add(WelcomeRoutineBegin());
+  flowScheduler.add(WelcomeRoutineEachFrame());
+  flowScheduler.add(WelcomeRoutineEnd());
+
   flowScheduler.add(GlobalsRoutineBegin());
   flowScheduler.add(GlobalsRoutineEachFrame());
   flowScheduler.add(GlobalsRoutineEnd());
   const trialsLoopScheduler = new Scheduler(psychoJS);
+
   flowScheduler.add(trialsLoopBegin(trialsLoopScheduler));
   flowScheduler.add(trialsLoopScheduler);
   flowScheduler.add(trialsLoopEnd);
   flowScheduler.add(ITIRoutineBegin());
   flowScheduler.add(ITIRoutineEachFrame());
   flowScheduler.add(ITIRoutineEnd());
+  flowScheduler.add(ThanksRoutineBegin());
+  flowScheduler.add(ThanksRoutineEachFrame());
+  flowScheduler.add(ThanksRoutineEnd());
   flowScheduler.add(quitPsychoJS, '', true);
 
   dialogCancelScheduler.add(quitPsychoJS, '', false);
 
-  // 4) Start WITH resources so they’re preloaded
+  // Start WITH resources so they’re preloaded
   psychoJS.start({ expName, expInfo, resources });
   psychoJS.experimentLogger.setLevel(core.Logger.ServerLevel.EXP);
 })();
-
 
 
 // =========================
@@ -224,6 +241,108 @@ const dialogCancelScheduler = new Scheduler(psychoJS);
 // =========================
 var currentLoop;
 var frameDur;
+// --- End/Thanks routine ---
+var ThanksClock;
+var thanksText;
+var thanksKey;
+var ThanksMaxDurationReached;
+var _thanksKey_allKeys;
+var ThanksMaxDuration;
+var ThanksComponents;
+
+function ThanksRoutineBegin(snapshot) {
+  return async function () {
+    TrialHandler.fromSnapshot(snapshot);
+
+    t = 0; frameN = -1; continueRoutine = true; routineForceEnded = false;
+
+    ThanksClock.reset(); routineTimer.reset(); ThanksMaxDurationReached = false;
+
+    thanksKey.keys = undefined;
+    thanksKey.rt = undefined;
+    _thanksKey_allKeys = [];
+
+    psychoJS.experiment.addData('Thanks.started', globalClock.getTime());
+    ThanksMaxDuration = null;
+
+    ThanksComponents = [thanksText, thanksKey];
+    ThanksComponents.forEach(c => { if ('status' in c) c.status = PsychoJS.Status.NOT_STARTED; });
+
+    return Scheduler.Event.NEXT;
+  };
+}
+
+function ThanksRoutineEachFrame() {
+  return async function () {
+    t = ThanksClock.getTime();
+    frameN += 1;
+
+    if (t >= 0.0 && thanksText.status === PsychoJS.Status.NOT_STARTED) {
+      thanksText.tStart = t;
+      thanksText.frameNStart = frameN;
+      thanksText.setAutoDraw(true);
+    }
+
+    if (t >= 0.0 && thanksKey.status === PsychoJS.Status.NOT_STARTED) {
+      thanksKey.tStart = t;
+      thanksKey.frameNStart = frameN;
+      psychoJS.window.callOnFlip(() => { thanksKey.clock.reset(); });
+      psychoJS.window.callOnFlip(() => { thanksKey.start(); });
+      psychoJS.window.callOnFlip(() => { thanksKey.clearEvents(); });
+    }
+
+    if (thanksKey.status === PsychoJS.Status.STARTED) {
+       // accept Enter/Return (and Space as a friendly fallback)
+       let theseKeys = thanksKey.getKeys({ keyList: ['return', 'enter', 'space'], waitRelease: false });
+      _thanksKey_allKeys = _thanksKey_allKeys.concat(theseKeys);
+      if (_thanksKey_allKeys.length > 0) {
+        const last = _thanksKey_allKeys[_thanksKey_allKeys.length - 1];
+        thanksKey.keys = last.name;
+        thanksKey.rt = last.rt;
+        thanksKey.duration = last.duration;
+        // Immediately stop listening to prevent duplicate captures
+        thanksKey.stop();
+        thanksKey.status = PsychoJS.Status.FINISHED;
+        continueRoutine = false;
+      }
+    }
+
+    if (psychoJS.experiment.experimentEnded || psychoJS.eventManager.getKeys({ keyList: ['escape'] }).length > 0) {
+      return quitPsychoJS('The [Escape] key was pressed. Goodbye!', false);
+    }
+
+    if (!continueRoutine) { routineForceEnded = true; return Scheduler.Event.NEXT; }
+
+    continueRoutine = false;
+    ThanksComponents.forEach(c => {
+      if ('status' in c && c.status !== PsychoJS.Status.FINISHED) continueRoutine = true;
+    });
+
+    if (continueRoutine) return Scheduler.Event.FLIP_REPEAT;
+    return Scheduler.Event.NEXT;
+  };
+}
+
+function ThanksRoutineEnd(snapshot) {
+  return async function () {
+    ThanksComponents.forEach(c => { if (typeof c.setAutoDraw === 'function') c.setAutoDraw(false); });
+    psychoJS.experiment.addData('Thanks.stopped', globalClock.getTime());
+
+    psychoJS.experiment.addData('thanksKey.keys', thanksKey.keys);
+    if (typeof thanksKey.keys !== 'undefined') {
+      psychoJS.experiment.addData('thanksKey.rt', thanksKey.rt);
+      psychoJS.experiment.addData('thanksKey.duration', thanksKey.duration);
+      routineTimer.reset();
+    }
+
+    thanksKey.stop();
+    routineTimer.reset();
+
+    if (currentLoop === psychoJS.experiment) psychoJS.experiment.nextEntry(snapshot);
+    return Scheduler.Event.NEXT;
+  };
+}
+
 
 async function updateInfo() {
   currentLoop = psychoJS.experiment;
@@ -246,8 +365,14 @@ async function updateInfo() {
 }
 
 // =========================
-// Components & state
-// =========================
+var WelcomeClock;
+var welcomeText;
+var welcomeKey;
+var WelcomeMaxDurationReached;
+var _welcomeKey_allKeys;
+var WelcomeMaxDuration;
+var WelcomeComponents;
+
 var GlobalsClock;
 var prevSession;
 var frameIdx;
@@ -317,7 +442,7 @@ async function experimentInit() {
   img = new visual.ImageStim({
     win: psychoJS.window,
     name: 'img',
-    image: 'resources/images/157_Chairs.png',          // ⟵ was '157_Chairs.png'
+    image: 'resources/images/157_Chairs.png',
     anchor: 'center',
     ori: 0.0,
     pos: [0, 0],
@@ -347,9 +472,59 @@ async function experimentInit() {
   // Local ITI timer (we manage it ourselves)
   itiClock = new util.Clock();
 
+  // ---- Welcome (instructions) ----
+  WelcomeClock = new util.Clock();
+  welcomeText = new visual.TextStim({
+    win: psychoJS.window,
+    name: 'welcomeText',
+    text:
+`Before you start:
+1) If you came here from MTurk and clicked "Accept HIT", you don't need to type anything—your MTurk IDs are attached automatically.
+2) If prompted for your MTurk Worker ID, paste your Worker ID (e.g., A1ABC23DEF45G). Do NOT paste your name or email.
+3) If you're seeing this via MTurk Preview (ASSIGNMENT_ID_NOT_AVAILABLE), please go back and click "Accept HIT" first.
+
+Task instructions:
+• You will complete a 1-back category task.
+• Each trial contains 6 images (frames). Starting from the 2nd frame, press:
+    - 'X' if the current image's CATEGORY matches the previous frame,
+    - 'B' if it DOES NOT match.
+• Each frame is shown for 500 ms, followed by a 2-second interval.
+• There are 3 sessions of 20 trials each. You can take short breaks between sessions.
+
+Press Enter to start.`,
+    font: 'Open Sans',
+    pos: [0, 0], draggable: false, height: 0.04,
+    color: new util.Color('white'),
+    wrapWidth: 1.2,
+    depth: 0.0
+  });
+  welcomeKey = new core.Keyboard({ psychoJS, clock: new util.Clock(), waitForStart: true });
+
   // ---- timers ----
   globalClock = new util.Clock();
   routineTimer = new util.CountdownTimer();
+
+  // ---- Thanks (end screen) ----
+  ThanksClock = new util.Clock();
+  thanksText = new visual.TextStim({
+    win: psychoJS.window,
+    name: 'thanksText',
+    text:
+`Thank you for participating!
+
+Please submit the MTurk survey code shown on the MTurk page (if provided by the requester).
+
+Press Enter to finish.
+
+Important: after you press Enter, do not close this page until the data file has
+finished uploading (this may take a few seconds).`,
+    font: 'Open Sans',
+    pos: [0, 0], draggable: false, height: 0.05,
+    color: new util.Color('white'),
+    wrapWidth: 1.2,
+    depth: 0.0
+  });
+  thanksKey = new core.Keyboard({ psychoJS, clock: new util.Clock(), waitForStart: true });
 
   return Scheduler.Event.NEXT;
 }
@@ -517,6 +692,94 @@ function framesLoopBegin(framesLoopScheduler, snapshot) {
       framesLoopScheduler.add(framesLoopEndIteration(framesLoopScheduler, snapshot));
     });
 
+    return Scheduler.Event.NEXT;
+  };
+}
+
+function WelcomeRoutineBegin(snapshot) {
+  return async function () {
+    TrialHandler.fromSnapshot(snapshot);
+
+    t = 0; frameN = -1; continueRoutine = true; routineForceEnded = false;
+    WelcomeClock.reset(); routineTimer.reset(); WelcomeMaxDurationReached = false;
+
+    welcomeKey.keys = undefined;
+    welcomeKey.rt = undefined;
+    _welcomeKey_allKeys = [];
+
+    psychoJS.experiment.addData('Welcome.started', globalClock.getTime());
+    WelcomeMaxDuration = null;
+
+    WelcomeComponents = [welcomeText, welcomeKey];
+    WelcomeComponents.forEach(c => { if ('status' in c) c.status = PsychoJS.Status.NOT_STARTED; });
+
+    return Scheduler.Event.NEXT;
+  };
+}
+
+function WelcomeRoutineEachFrame() {
+  return async function () {
+    t = WelcomeClock.getTime();
+    frameN += 1;
+
+    if (t >= 0.0 && welcomeText.status === PsychoJS.Status.NOT_STARTED) {
+      welcomeText.tStart = t;
+      welcomeText.frameNStart = frameN;
+      welcomeText.setAutoDraw(true);
+    }
+
+    if (t >= 0.0 && welcomeKey.status === PsychoJS.Status.NOT_STARTED) {
+      welcomeKey.tStart = t;
+      welcomeKey.frameNStart = frameN;
+      psychoJS.window.callOnFlip(() => { welcomeKey.clock.reset(); });
+      psychoJS.window.callOnFlip(() => { welcomeKey.start(); });
+      psychoJS.window.callOnFlip(() => { welcomeKey.clearEvents(); });
+    }
+
+    if (welcomeKey.status === PsychoJS.Status.STARTED) {
+      let theseKeys = welcomeKey.getKeys({ keyList: ['return', 'enter'], waitRelease: false });
+      _welcomeKey_allKeys = _welcomeKey_allKeys.concat(theseKeys);
+      if (_welcomeKey_allKeys.length > 0) {
+        const last = _welcomeKey_allKeys[_welcomeKey_allKeys.length - 1];
+        welcomeKey.keys = last.name;
+        welcomeKey.rt = last.rt;
+        welcomeKey.duration = last.duration;
+        continueRoutine = false;
+      }
+    }
+
+    if (psychoJS.experiment.experimentEnded || psychoJS.eventManager.getKeys({ keyList: ['escape'] }).length > 0) {
+      return quitPsychoJS('The [Escape] key was pressed. Goodbye!', false);
+    }
+
+    if (!continueRoutine) { routineForceEnded = true; return Scheduler.Event.NEXT; }
+
+    continueRoutine = false;
+    WelcomeComponents.forEach(c => {
+      if ('status' in c && c.status !== PsychoJS.Status.FINISHED) continueRoutine = true;
+    });
+
+    if (continueRoutine) return Scheduler.Event.FLIP_REPEAT;
+    return Scheduler.Event.NEXT;
+  };
+}
+
+function WelcomeRoutineEnd(snapshot) {
+  return async function () {
+    WelcomeComponents.forEach(c => { if (typeof c.setAutoDraw === 'function') c.setAutoDraw(false); });
+    psychoJS.experiment.addData('Welcome.stopped', globalClock.getTime());
+
+    if (currentLoop instanceof MultiStairHandler) currentLoop.addResponse(welcomeKey.corr, level);
+    psychoJS.experiment.addData('welcomeKey.keys', welcomeKey.keys);
+    if (typeof welcomeKey.keys !== 'undefined') {
+      psychoJS.experiment.addData('welcomeKey.rt', welcomeKey.rt);
+      psychoJS.experiment.addData('welcomeKey.duration', welcomeKey.duration);
+      routineTimer.reset();
+    }
+    welcomeKey.stop();
+    routineTimer.reset();
+
+    if (currentLoop === psychoJS.experiment) psychoJS.experiment.nextEntry(snapshot);
     return Scheduler.Event.NEXT;
   };
 }
@@ -692,10 +955,6 @@ function TrialIntroRoutineBegin(snapshot) {
     stimPaths = [stim1, stim2, stim3, stim4, stim5, stim6];
     actKeys  = [null, low(act2), low(act3), low(act4), low(act5), low(act6)];
 
-    // optional sanity logs
-    // console.log('Trial stimPaths:', stimPaths);
-    // console.log('Trial actKeys  :', actKeys);
-
     psychoJS.experiment.addData('TrialIntro.started', globalClock.getTime());
     TrialIntroMaxDuration = null;
 
@@ -797,7 +1056,7 @@ function FrameRoutineBegin(snapshot) {
     routineForceEnded = false;
 
     FrameClock.reset(routineTimer.getTime());
-    routineTimer.add(2.000000);
+    routineTimer.add(2.500000); // 0.5s image + 2.0s response = 2.5s total
     FrameMaxDurationReached = false;
 
     resp.keys = undefined;
@@ -837,13 +1096,13 @@ function FrameRoutineEachFrame() {
     t = FrameClock.getTime();
     frameN += 1;
 
-    // image on for 1.0s
+    // image on for 0.5s
     if (t >= 0.0 && img.status === PsychoJS.Status.NOT_STARTED) {
       img.tStart = t;
       img.frameNStart = frameN;
       img.setAutoDraw(true);
     }
-    frameRemains = 0.0 + 1.0 - psychoJS.window.monitorFramePeriod * 0.75;
+    frameRemains = 0.0 + 0.5 - psychoJS.window.monitorFramePeriod * 0.75;
     if (img.status === PsychoJS.Status.STARTED && t >= frameRemains) {
       img.tStop = t;
       img.frameNStop = frameN;
@@ -851,15 +1110,15 @@ function FrameRoutineEachFrame() {
       img.setAutoDraw(false);
     }
 
-    // response active for 2.0s
-    if (t >= 0.0 && resp.status === PsychoJS.Status.NOT_STARTED) {
+    // response active during the 2.0s delay
+    if (t >= 0.5 && resp.status === PsychoJS.Status.NOT_STARTED) {
       resp.tStart = t;
       resp.frameNStart = frameN;
       psychoJS.window.callOnFlip(() => { resp.clock.reset(); });
       psychoJS.window.callOnFlip(() => { resp.start(); });
       psychoJS.window.callOnFlip(() => { resp.clearEvents(); });
     }
-    frameRemains = 0.0 + 2.0 - psychoJS.window.monitorFramePeriod * 0.75;
+    frameRemains = 0.0 + 2.5 - psychoJS.window.monitorFramePeriod * 0.75;
     if (resp.status === PsychoJS.Status.STARTED && t >= frameRemains) {
       resp.tStop = t;
       resp.frameNStop = frameN;
@@ -915,7 +1174,7 @@ function FrameRoutineEnd(snapshot) {
     } else if (FrameMaxDurationReached) {
       FrameClock.add(FrameMaxDuration);
     } else {
-      FrameClock.add(2.000000);
+      FrameClock.add(2.500000);
     }
 
     if (currentLoop === psychoJS.experiment) psychoJS.experiment.nextEntry(snapshot);
@@ -1052,9 +1311,11 @@ async function quitPsychoJS(message, isCompleted) {
   try {
     const csv = buildCsvFromExperiment();
     const meta = {
-      workerId: expInfo?.workerId || 'local-test',
-      participant: expInfo?.participant || '',
-      timestamp: new Date().toISOString(),
+      workerId:     expInfo?.workerId || '',
+      assignmentId: expInfo?.assignmentId || '',
+      hitId:        expInfo?.hitId || '',
+      participant:  expInfo?.participant || '',
+      timestamp:    new Date().toISOString(),
     };
     await uploadCsvToSheets(csv, meta);
   } catch (e) {
@@ -1065,4 +1326,3 @@ async function quitPsychoJS(message, isCompleted) {
   psychoJS.quit({ message, isCompleted });
   return Scheduler.Event.QUIT;
 }
-
