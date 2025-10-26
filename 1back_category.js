@@ -11,8 +11,13 @@ const { Scheduler } = util;
 
 // ---- Experiment metadata ----
 let expName = '1back_category';
-let expInfo = { participant: '' };
+let expInfo = {
+  participant: '',
+  workerId:   '',           // <— NEW: user will type Worker ID here
+  mturkLink:  ''            // <— NEW: user will paste MTurk worker page URL here
+};
 let PILOTING = util.getUrlParameters().has('__pilotToken');
+
 
 // ---- MTurk params (robust) ----
 const params = new URLSearchParams(window.location.search);
