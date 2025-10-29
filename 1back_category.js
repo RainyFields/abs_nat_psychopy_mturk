@@ -456,12 +456,12 @@ async function experimentInit() {
   // Local ITI timer (we manage it ourselves)
   itiClock = new util.Clock();
 
-  // ---- Welcome (instructions) ----
+ // ---- Welcome (instructions) ----
   WelcomeClock = new util.Clock();
   welcomeText = new visual.TextStim({
-    win: psychoJS.window,
-    name: 'welcomeText',
-    text:
+  win: psychoJS.window,
+  name: 'welcomeText',
+  text:
 `
 Task instructions:
 • You will complete a 1-back category task.
@@ -469,16 +469,25 @@ Task instructions:
     - 'X' if the current image's CATEGORY matches the previous frame,
     - 'B' if it DOES NOT match.
 • Each frame is shown for 500 ms, followed by a 2-second interval.
-• There are 3 sessions of 20 trials each. You can take short breaks between sessions.
+• There are 5 sessions of 20 trials each. You can take short breaks between sessions.
 
 Press Enter to start.`,
-    font: 'Open Sans',
-    pos: [0, 0], draggable: false, height: 0.04,
-    color: new util.Color('white'),
-    wrapWidth: 1.2,
-    depth: 0.0
-  });
-  welcomeKey = new core.Keyboard({ psychoJS, clock: new util.Clock(), waitForStart: true });
+  font: 'Open Sans',
+
+  // ↓↓↓ the important bits ↓↓↓
+  pos: [0, 0],            // center of the screen
+  anchor: 'center',       // anchor the text box at its center
+  alignHoriz: 'center',   // center-align lines of text
+  alignVert: 'center',    // center-align vertically if multiple lines
+  height: 0.028,          // smaller text (try 0.024–0.032 to taste)
+  wrapWidth: 0.9,         // narrower paragraph width so it reads nicer
+  // ↑↑↑ the important bits ↑↑↑
+
+  draggable: false,
+  color: new util.Color('white'),
+  depth: 0.0
+});
+welcomeKey = new core.Keyboard({ psychoJS, clock: new util.Clock(), waitForStart: true });
 
   // ---- timers ----
   globalClock = new util.Clock();
