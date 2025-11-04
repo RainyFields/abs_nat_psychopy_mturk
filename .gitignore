@@ -166,5 +166,3 @@ dmypy.json
 cython_debug/
 
 .idea/
-
-trial_gen
