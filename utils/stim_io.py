@@ -123,9 +123,11 @@ class HvMMetaData:
     def __init__(
             self,
             root_dir: Union[str, Path],
-            normalize: str = "minmax"
+            normalize: str = "minmax",
+            grid_size=3,
     ):
         self.root_dir = Path(root_dir)
+        self.grid_size = grid_size
         self.meta_dir = self.root_dir / "python"
         self.stim_dir = self.root_dir / "HvM_with_discfade"
         self.normalize = normalize
@@ -179,6 +181,10 @@ class HvMMetaData:
             raise ValueError("Metadata must contain 'category' and 'obj' columns")
 
         self._build_mappings()
+        # 1-based IDs
+        self.df["cat_1b"] = self.df["category_id"].astype(int) + 1
+        self.df["id_1b"] = self.df["obj_id"].astype(int) + 1
+        self.df["pos_1b"] = self._build_discrete_positions(self.df, "ty", "tz", self.grid_size)
         return self.df
 
     def validate_structure(self):
@@ -259,6 +265,22 @@ class HvMMetaData:
         self.filename_to_idx = filename_to_idx
         return img_tensor, filename_to_idx
 
+    @staticmethod
+    def _build_discrete_positions(df, ty_col: str, tz_col: str, grid_size: int) -> np.ndarray:
+        tx = df[ty_col].to_numpy()  # ty_col actually stores horizontal position
+        ty = df[tz_col].to_numpy()  # tz_col actually stores vertical position
+
+        tx_edges = np.linspace(tx.min(), tx.max(), grid_size + 1)
+        ty_edges = np.linspace(ty.min(), ty.max(), grid_size + 1)
+
+        tx_bin = np.clip(np.digitize(tx, tx_edges[:-1], right=False), 1, grid_size)
+        ty_bin = np.clip(np.digitize(ty, ty_edges[:-1], right=False), 1, grid_size)
+
+        tx_bin_flipped = grid_size + 1 - tx_bin
+        ty_bin_flipped = grid_size + 1 - ty_bin  # this doesn't affect tasks, just for human visualization
+        pos = (ty_bin_flipped - 1) * grid_size + tx_bin_flipped
+        return pos.astype(int)
+
 
 class HvMImageLoader:
     """
@@ -335,7 +357,7 @@ class HvMImageLoader:
             current_file = Path(__file__).resolve()
             project_root = current_file.parents[1]
             root_dir = project_root / 'data' / 'original'
-        meta = HvMMetaData(root_dir)
+        meta = HvMMetaData(root_dir, grid_size=grid_size)
         if preload_images:
             img_read_fn = make_read_fn(img_size, pretrained_stats, transform)
             meta.build_image_cache(img_read_fn=img_read_fn)
@@ -445,7 +467,7 @@ class HvMImageLoader:
         If `preload_images=True`,
         we read all images once with cv2.imread and keep them in RAM.
         """
-        if hasattr(self, "_task_cache"):
+        if hasattr(self, "_task_cache") and self._task_cache is not None:
             tc = self._task_cache
             return tc  # already prepared
 
@@ -471,10 +493,6 @@ class HvMImageLoader:
                 size_dim
         )
 
-        # 1-based IDs
-        task_df["cat_1b"] = task_df["category_id"].astype(int) + 1
-        task_df["id_1b"] = task_df["obj_id"].astype(int) + 1
-        task_df["pos_1b"] = self._build_discrete_positions(task_df, "ty", "tz", grid_size)
         # maps
         triple_to_indices = defaultdict(list)
         cat_to_ids = defaultdict(set)
@@ -538,22 +556,6 @@ class HvMImageLoader:
             filename_to_idx=filename_to_idx
         )
         return
-
-    @staticmethod
-    def _build_discrete_positions(df, ty_col: str, tz_col: str, grid_size: int) -> np.ndarray:
-        tx = df[ty_col].to_numpy()  # ty_col actually stores horizontal position
-        ty = df[tz_col].to_numpy()  # tz_col actually stores vertical position
-
-        tx_edges = np.linspace(tx.min(), tx.max(), grid_size + 1)
-        ty_edges = np.linspace(ty.min(), ty.max(), grid_size + 1)
-
-        tx_bin = np.clip(np.digitize(tx, tx_edges[:-1], right=False), 1, grid_size)
-        ty_bin = np.clip(np.digitize(ty, ty_edges[:-1], right=False), 1, grid_size)
-
-        tx_bin_flipped = grid_size + 1 - tx_bin
-        ty_bin_flipped = grid_size + 1 - ty_bin  # this doesn't affect tasks, just for human visualization
-        pos = (ty_bin_flipped - 1) * grid_size + tx_bin_flipped
-        return pos.astype(int)
 
     def get_path_coverage(self):
         """

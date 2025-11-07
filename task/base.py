@@ -137,14 +137,12 @@ class TaskDataset(Dataset):
     def _get_new(
             self,
             prev: int,
-            limit: int, *,
             category: Optional[int] = None,
             identity: Optional[int] = None
     ) -> int:
         """
         Return a new available value (1-based) for the current feature, excluding `prev`.
         `category` is used when sampling identities (to pick identities available in that category).
-        `limit` is kept for API compatibility but not used for restricting choices (we sample from available sets).
         """
         if self.feature == "category":
             choices = self.available_categories()
@@ -152,7 +150,6 @@ class TaskDataset(Dataset):
 
         elif self.feature == "identity":
             # sample among identities available for the given category.
-            # if none, then return
             choices = self.available_identities(category)
             return int(self._sample_from(choices, exclude=prev))
         else:  # position
@@ -174,19 +171,15 @@ class TaskDataset(Dataset):
             action = 1
             if self.feature == 'category':
                 category, identity, position, view, size = self._set_random(
-                    data,
-                    category=category
+                    data, category=category
                 )
             elif self.feature == 'identity':
                 category, identity, position, view, size = self._set_random(
-                    data,
-                    category=category,
-                    identity=identity
+                    data, category=category, identity=identity
                 )
             elif self.feature == 'position':
                 category, identity, position, view, size = self._set_random(
-                    data,
-                    position=position
+                    data, position=position
                 )
         else:  # no match, sample new feature
             if self.feature == 'category':
@@ -197,20 +190,28 @@ class TaskDataset(Dataset):
             elif self.feature == 'identity':
                 new_category = random.choice(self.available_categories())
                 if new_category == category:
-                    new_identity = self._get_new(identity, self.identity_size, category=new_category)
+                    new_identity = self._get_new(
+                        identity, category=new_category
+                    )
                 else:
                     new_identity = self._sample_from(self.available_identities(category=new_category))
                 category, identity, position, view, size = self._set_random(
-                    data,
-                    category=new_category,
-                    identity=new_identity
+                    data, category=new_category, identity=new_identity
                 )
             elif self.feature == 'position':
-                new_position = self._get_new(position, self.position_size)
-                category, identity, position, view, size = self._set_random(
-                    data, position=new_position
+                rand_category = random.choice(self.available_categories())
+                rand_identity = self._sample_from(
+                    self.available_identities(category=rand_category)
                 )
-
+                new_position = self._get_new(
+                    position, category=rand_category, identity=rand_identity,
+                )
+                category, identity, position, view, size = self._set_random(
+                    data,
+                    category=rand_category,
+                    identity=rand_identity,
+                    position=new_position
+                )
         return action, category, identity, position, view, size
 
     def _encode_discrete(self, data: torch.Tensor, category: int, identity: int, position: int):
@@ -393,11 +394,8 @@ class HvMTaskDataset(TaskDataset):
         self._valid_triples = self.cache.valid_triples
         self._row_indices = np.arange(len(self._cats))
 
-        min_count = 9
         self.categories = [
-            c
-            for c in range(1, self.category_size + 1)
-            if np.where(self._cats == c)[0].size > min_count
+            c for c in range(1, self.category_size + 1)
         ]
         self.ids = {c: list() for c in range(1, self.category_size + 1)}
         self.pos = self.cache.catid_to_positions
@@ -405,7 +403,7 @@ class HvMTaskDataset(TaskDataset):
         self.global_pos = set(range(1, self.position_size + 1))
         for c in self.categories:
             for i in range(1, self.identity_size + 1):
-                if np.where((self._ids == i) & (self._cats == c))[0].size > min_count:
+                if np.where((self._ids == i) & (self._cats == c))[0].size > 0:
                     self.ids[c].append(i)
                 key = (c, i)
                 if key in self.pos:
@@ -421,6 +419,7 @@ class HvMTaskDataset(TaskDataset):
 
     def available_positions(self, category=None, identity=None):
         if category is None or identity is None:
+            print('sampling random pos')
             return self.global_pos
         return self.pos[(category, identity)]
 

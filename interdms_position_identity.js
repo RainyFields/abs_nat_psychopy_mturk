@@ -4,14 +4,14 @@
  * - Validates image paths to avoid preload crashes
  ***********************/
 
-import {core, data, sound, util, visual, hardware} from './lib/psychojs-2025.1.1.js';
+import {core, data, util, visual} from './lib/psychojs-2025.1.1.js';
 
 const {PsychoJS} = core;
 const {TrialHandler, MultiStairHandler} = data;
 const {Scheduler} = util;
 
 // ---- Experiment metadata ----
-let expName = 'interdms_position_identity';
+let expName = 'interdms_position_identity_trials';
 let expInfo = {
     workerId: '',           // <— NEW: user will type Worker ID here
     mturkLink: ''            // <— NEW: user will paste MTurk worker page URL here
@@ -98,7 +98,7 @@ const IMG_DIR = `${ASSETS_DIR}/images`;
 const FALLBACK = `${IMG_DIR}/157_Chairs.png`;
 
 // --- Resource preload (collect from CSV + add fallback) ---
-const TRIALS_CSV = 'resources/interdms_position_identity.csv';
+const TRIALS_CSV = 'resources/interdms_debug.csv';
 const ALWAYS_RESOURCES = ['resources/images/157_Chairs.png']; // fallback
 
 async function collectImagePathsFromCSV(csvPath) {
@@ -482,11 +482,12 @@ async function experimentInit() {
         text:
             `
 Task instructions:
-• You will complete a 1-back category task.
+• You will complete an InterDMS Position Identity task.
 • Each trial contains 6 images (frames). Starting from the 2nd frame, press:
     - 'X' if the current image's CATEGORY matches the previous frame,
     - 'B' if it DOES NOT match.
-• Each frame is shown for 500 ms, followed by a 2-second interval.
+
+• Each frame is shown for 500 ms, followed by a 2-second interval, with delay frames.
 • There are 5 sessions of 20 trials each. You can take short breaks between sessions.
 
 Press Enter to start.`,
@@ -625,7 +626,7 @@ function trialsLoopBegin(trialsLoopScheduler, snapshot) {
             psychoJS,
             nReps: 1, method: TrialHandler.Method.SEQUENTIAL,
             extraInfo: expInfo, originPath: undefined,
-            trialList: 'resources/interdms_position_identity.csv',
+            trialList: 'resources/interdms_debug.csv',
             seed: undefined, name: 'trials'
         });
         psychoJS.experiment.addLoop(trials);
