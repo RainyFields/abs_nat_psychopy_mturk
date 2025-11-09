@@ -50,6 +50,15 @@ function buildCsvFallback() {
     return lines.join('\n');
 }
 
+// Helper to normalize action tokens into null or a lowercase key
+function normalizeAction(a) {
+    if (a === undefined || a === null) return null;
+    if (typeof a !== 'string') return a;
+    const s = a.trim().toLowerCase();
+    if (s === '' || s === 'none' || s === 'null' || s === 'nan') return null;
+    return s;
+}
+
 // ===== Cloud upload config =====
 const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbx43V8Aha-JTWTKj51PHQo5SkQztRsV0EYfyAsULh2-NQeFcC1Y8k6wYyhO0_5b_p2amg/exec';
 
@@ -996,13 +1005,16 @@ function TrialIntroRoutineBegin(snapshot) {
         // --- Prepare stim & expected keys for the 6 frames ---
         frameIdx = -1;
 
-        function low(s) {
-            return (((typeof s) === "string") || (s instanceof String)) ? s.toLowerCase() : s;
-        }
-
-        // TODO: allow null in actKeys
         stimPaths = [stim1, stim2, stim3, stim4, stim5, stim6];
-        actKeys = [null, low(act2), low(act3), low(act4), low(act5), low(act6)];
+        // act1 unused; allow nulls in the rest
+        actKeys = [
+            null, // align indices with frameIdx if you start counting at 1 later
+            normalizeAction(act2),
+            normalizeAction(act3),
+            normalizeAction(act4),
+            normalizeAction(act5),
+            normalizeAction(act6),
+        ];
 
         psychoJS.experiment.addData('TrialIntro.started', globalClock.getTime());
         TrialIntroMaxDuration = null;
