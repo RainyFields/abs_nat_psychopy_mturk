@@ -490,26 +490,37 @@ async function experimentInit() {
         name: 'welcomeText',
         text:
             `
-Task instructions:
-• You will complete an InterDMS Position Identity task.
-• Each trial contains 6 images (frames). Starting from the 2nd frame, press:
-    - 'X' if the current image's CATEGORY matches the previous frame,
-    - 'B' if it DOES NOT match.
+    Task instructions:
 
-• Each frame is shown for 500 ms, followed by a 2-second interval, with delay frames.
-• There are 5 sessions of 20 trials each. You can take short breaks between sessions.
+    • You will perform an Inter(-leaved)DMS ABAB Position–Identity task.
 
-Press Enter to start.`,
+    • Each trial consists of a sequence of  4 images. You will make two comparisons:
+
+      1) Location match (3rd vs 1st frame):
+         – Compare the 3rd frame with the 1st frame.
+         – If the stimulus appears in the same LOCATION, press 'X' as soon as you see the 3rd frame.
+         – Otherwise, press 'B'.
+
+      2) Identity match (4th vs 2nd frame):
+         – Compare the 4th frame with the 2nd frame.
+         – If the object is the same (for example, the same plane), press 'X' as soon as you see the 4th frame.
+         – Otherwise, press 'B'.
+
+    • Each image is shown for 500 ms, followed by a 2-second response window in which you can press 'X' or 'B'.
+
+    • There are 5 sessions of 20 trials each. You can take short breaks between sessions.
+
+    Press Enter to start.`,
         font: 'Open Sans',
 
-        // ↓↓↓ the important bits ↓↓↓
-        pos: [0, 0],            // center of the screen
-        anchor: 'center',       // anchor the text box at its center
-        alignHoriz: 'center',   // center-align lines of text
-        alignVert: 'center',    // center-align vertically if multiple lines
-        height: 0.028,          // smaller text (try 0.024–0.032 to taste)
-        wrapWidth: 0.9,         // narrower paragraph width so it reads nicer
-        // ↑↑↑ the important bits ↑↑↑
+        // ↓↓↓ layout bits ↓↓↓
+        pos: [0, 0],
+        anchor: 'center',
+        alignHoriz: 'center',
+        alignVert: 'center',
+        height: 0.028,
+        wrapWidth: 1.3,
+        // ↑↑↑ layout bits ↑↑↑
 
         draggable: false,
         color: new util.Color('white'),
@@ -699,7 +710,7 @@ function framesLoopBegin(framesLoopScheduler, snapshot) {
 
         frames = new TrialHandler({
             psychoJS,
-            nReps: 6, method: TrialHandler.Method.SEQUENTIAL,
+            nReps: 4, method: TrialHandler.Method.SEQUENTIAL,
             extraInfo: expInfo, originPath: undefined,
             trialList: undefined,
             seed: undefined, name: 'frames'
@@ -1005,15 +1016,13 @@ function TrialIntroRoutineBegin(snapshot) {
         // --- Prepare stim & expected keys for the 6 frames ---
         frameIdx = -1;
 
-        stimPaths = [stim1, stim2, stim3, stim4, stim5, stim6];
+        stimPaths = [stim1, stim2, stim3, stim4];
         // act1 unused; allow nulls in the rest
         actKeys = [
             null, // align indices with frameIdx if you start counting at 1 later
-            normalizeAction(act2),
+            null,
             normalizeAction(act3),
             normalizeAction(act4),
-            normalizeAction(act5),
-            normalizeAction(act6),
         ];
 
         psychoJS.experiment.addData('TrialIntro.started', globalClock.getTime());
@@ -1183,37 +1192,43 @@ function FrameRoutineEachFrame() {
             img.setAutoDraw(false);
         }
 
-        // response active during the 2.0s delay
-        if (t >= 0.5 && resp.status === PsychoJS.Status.NOT_STARTED) {
-            resp.tStart = t;
-            resp.frameNStart = frameN;
-            psychoJS.window.callOnFlip(() => {
-                resp.clock.reset();
-            });
-            psychoJS.window.callOnFlip(() => {
-                resp.start();
-            });
-            psychoJS.window.callOnFlip(() => {
-                resp.clearEvents();
-            });
-        }
-        frameRemains = 0.0 + 2.5 - psychoJS.window.monitorFramePeriod * 0.75;
-        if (resp.status === PsychoJS.Status.STARTED && t >= frameRemains) {
-            resp.tStop = t;
-            resp.frameNStop = frameN;
-            resp.status = PsychoJS.Status.FINISHED;
-        }
+        // response active during the 2.0s delay ONLY on frames 3 and 4
+        // frameIdx: 0 → 1st frame, 1 → 2nd, 2 → 3rd, 3 → 4th
+        if (frameIdx === 2 || frameIdx === 3) {
 
-        if (resp.status === PsychoJS.Status.STARTED) {
-            let theseKeys = resp.getKeys({keyList: ['x', 'b'], waitRelease: false});
-            _resp_allKeys = _resp_allKeys.concat(theseKeys);
-            if (_resp_allKeys.length > 0) {
-                const last = _resp_allKeys[_resp_allKeys.length - 1];
-                resp.keys = last.name;
-                resp.rt = last.rt;
-                resp.duration = last.duration;
+            if (t >= 0.0 && resp.status === PsychoJS.Status.NOT_STARTED) {
+                resp.tStart = t;
+                resp.frameNStart = frameN;
+                psychoJS.window.callOnFlip(() => {
+                    resp.clock.reset();
+                });
+                psychoJS.window.callOnFlip(() => {
+                    resp.start();
+                });
+                psychoJS.window.callOnFlip(() => {
+                    resp.clearEvents();
+                });
+            }
+
+            frameRemains = 0.0 + 2.5 - psychoJS.window.monitorFramePeriod * 0.75;
+            if (resp.status === PsychoJS.Status.STARTED && t >= frameRemains) {
+                resp.tStop = t;
+                resp.frameNStop = frameN;
+                resp.status = PsychoJS.Status.FINISHED;
+            }
+
+            if (resp.status === PsychoJS.Status.STARTED) {
+                let theseKeys = resp.getKeys({keyList: ['x', 'b'], waitRelease: false});
+                _resp_allKeys = _resp_allKeys.concat(theseKeys);
+                if (_resp_allKeys.length > 0) {
+                    const last = _resp_allKeys[_resp_allKeys.length - 1];
+                    resp.keys = last.name;
+                    resp.rt = last.rt;
+                    resp.duration = last.duration;
+                }
             }
         }
+
 
         if (psychoJS.experiment.experimentEnded || psychoJS.eventManager.getKeys({keyList: ['escape']}).length > 0) {
             return quitPsychoJS('The [Escape] key was pressed. Goodbye!', false);
@@ -1243,14 +1258,19 @@ function FrameRoutineEnd(snapshot) {
         });
         psychoJS.experiment.addData('Frame.stopped', globalClock.getTime());
 
-        if (currentLoop instanceof MultiStairHandler) currentLoop.addResponse(resp.corr, level);
-        psychoJS.experiment.addData('resp.keys', resp.keys);
-        if (typeof resp.keys !== 'undefined') {
-            psychoJS.experiment.addData('resp.rt', resp.rt);
-            psychoJS.experiment.addData('resp.duration', resp.duration);
+        // Only log responses for frame 3 and 4
+        if (frameIdx === 2 || frameIdx === 3) {
+            if (currentLoop instanceof MultiStairHandler) currentLoop.addResponse(resp.corr, level);
+
+            psychoJS.experiment.addData('resp.keys', resp.keys);
+            if (typeof resp.keys !== 'undefined') {
+                psychoJS.experiment.addData('resp.rt', resp.rt);
+                psychoJS.experiment.addData('resp.duration', resp.duration);
+            }
         }
 
         resp.stop();
+
 
         if (routineForceEnded) {
             routineTimer.reset();
