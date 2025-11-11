@@ -35,7 +35,6 @@ class TaskDataset(Dataset):
             position_size: int = 9,
             view_size: int = 3,
             size_dim: int = 1,
-            std: float = 0,
             feature: str = 'category',
     ):
         assert position_size in [4, 9], 'position size should be 2x2 or 3x3 grid'
@@ -363,7 +362,6 @@ class HvMTaskDataset(TaskDataset):
             task_len: int = 6,
             feature: str = "category",
             grid_size: int = 3,
-            std: float = 0.0,
     ):
         # Prepare the loader cache (positions, continuous features, optional images)
         self.cache = hvm_loader._task_cache
@@ -378,7 +376,6 @@ class HvMTaskDataset(TaskDataset):
             position_size=self.cache.position_size,
             view_size=self.cache.view_size,
             size_dim=self.cache.size_dim,
-            std=std,
             feature=feature,
         )
 

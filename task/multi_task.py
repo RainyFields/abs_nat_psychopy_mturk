@@ -288,7 +288,6 @@ class MultiTaskDataset(HvMTaskDataset, IterableDataset):
             dataloaders_dict=None,
             mode='train',
             dataset_size=128,
-            std: float = 0.0,
             task_weights=None,
     ):
         """
@@ -304,7 +303,6 @@ class MultiTaskDataset(HvMTaskDataset, IterableDataset):
             hvm_loader=hvm_loader,
             dataset_size=dataset_size,
             task_len=6,
-            std=std,
         )
         # multitask datasets use self.datasets to create trials
         self.dataset = None
@@ -321,7 +319,6 @@ class MultiTaskDataset(HvMTaskDataset, IterableDataset):
             dataset_kwargs = kwargs.copy()
             dataset_kwargs.update({
                 'hvm_loader': hvm_loader,
-                'std': 0.0,
                 'pad_to': 6,
                 'dataset_size': self.task_dataset_size[task_name],
             })

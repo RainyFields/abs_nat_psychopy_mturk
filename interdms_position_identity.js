@@ -107,7 +107,7 @@ const IMG_DIR = `${ASSETS_DIR}/images`;
 const FALLBACK = `${IMG_DIR}/157_Chairs.png`;
 
 // --- Resource preload (collect from CSV + add fallback) ---
-const TRIALS_CSV = 'resources/interdms_debug.csv';
+const TRIALS_CSV = 'resources/interdms_position_identity_trials.csv';
 const ALWAYS_RESOURCES = ['resources/images/157_Chairs.png']; // fallback
 
 async function collectImagePathsFromCSV(csvPath) {
@@ -646,7 +646,7 @@ function trialsLoopBegin(trialsLoopScheduler, snapshot) {
             psychoJS,
             nReps: 1, method: TrialHandler.Method.SEQUENTIAL,
             extraInfo: expInfo, originPath: undefined,
-            trialList: 'resources/interdms_debug.csv',
+            trialList: 'resources/interdms_position_identity_trials.csv',
             seed: undefined, name: 'trials'
         });
         psychoJS.experiment.addLoop(trials);

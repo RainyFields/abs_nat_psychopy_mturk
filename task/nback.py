@@ -11,7 +11,6 @@ class NBackDataset(HvMTaskDataset):
             feature: Literal["category", "identity", "position"] = "category",
             nback_n: int = 1,
             pad_to: int = 0,
-            std: float = 0,
             task_index_base_value: int = 0,
             total_tasks: int = 43,
     ):
@@ -20,7 +19,6 @@ class NBackDataset(HvMTaskDataset):
             dataset_size=dataset_size,
             hvm_loader=hvm_loader,
             task_len=task_len,
-            std=std,
         )
 
         self.feature = feature

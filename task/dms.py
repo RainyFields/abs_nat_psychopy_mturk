@@ -12,7 +12,6 @@ class DMSDataset(HvMTaskDataset):
             dataset_size: int = 128,
             feature: Literal["category", "identity", "position"] = "category",
             pad_to: int = 0,
-            std: float = 0,
             task_index_base_value: int = 40,
             total_tasks: int = 43,
     ):
@@ -21,7 +20,6 @@ class DMSDataset(HvMTaskDataset):
             hvm_loader=hvm_loader,
             dataset_size=dataset_size,
             task_len=task_len,
-            std=std,
             feature=feature,
         )
         self.feature = feature
@@ -82,16 +80,14 @@ class InterDMSDataset(HvMTaskDataset):
             feature_2: Literal["category", "identity", "position"] = "category",
             pattern: Literal["AABB", "ABBA", "ABAB"] = "AABB",
             pad_to: int = 0,
-            std: float = 0,
             task_index_base_value: int = 10,
             total_tasks: int = 43,
     ):
-        task_len = max(6, pad_to)
+        task_len = max(4, pad_to)
         super().__init__(
             hvm_loader=hvm_loader,
             dataset_size=dataset_size,
             task_len=task_len,
-            std=std,
         )
         self.feature_1 = feature_1
         self.feature_2 = feature_2
@@ -213,16 +209,14 @@ class CtxDMSDataset(HvMTaskDataset):
             dataset_size: int = 128,
             features: List[Literal["category", "identity", "position"]] = ["category", "identity", "position"],
             pad_to: int = 0,
-            std: float = 0,
             task_index_base_value: int = 36,
             total_tasks: int = 43,
     ):
-        task_len = max(6, pad_to)
+        task_len = max(3, pad_to)
         super().__init__(
             hvm_loader=hvm_loader,
             dataset_size=dataset_size,
             task_len=task_len,
-            std=std,
         )
         self.features = features
         self.task_index = get_one_hot(
